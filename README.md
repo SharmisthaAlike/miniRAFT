@@ -2,22 +2,33 @@
 
 A fault-tolerant real-time whiteboard backed by a simplified RAFT consensus protocol.
 
-## Quick Start
+## Quick Start (Running the Project)
 
+### Prerequisites (MacOS)
+If you are running on macOS, ensure you have your Docker daemon running. If you do not have Docker Desktop, you can easily use Colima:
 ```bash
-# Start everything
-docker-compose up --build
+# Start the Docker daemon using Colima
+colima start
+```
 
-# Open the frontend
-open http://localhost:3000   # or serve frontend/index.html from any static server
+### Starting the Cluster
+```bash
+# Start the Gateway, Frontend, and all 3 Replicas
+docker-compose up -d --build
 
-# Watch replica logs
+# Open the new Glassmorphic Frontend Dashboard
+open http://localhost:8080
+
+# Watch replica logs in real-time
 docker-compose logs -f replica1 replica2 replica3
+```
 
-# Kill a replica to trigger election
+### Simulating Failovers
+```bash
+# Kill the current leader to trigger a new election
 docker stop replica1
 
-# Restart it (catch-up protocol fires)
+# Restart it (catch-up protocol automatically syncs logs)
 docker start replica1
 ```
 
@@ -26,29 +37,20 @@ docker start replica1
 ```
 miniraft/
 ├── docker-compose.yml
-├── CONTRACTS.md        ← Week 1: all agreed interfaces (read this first!)
-├── ARCHITECTURE.md     ← Week 1: design doc submission
+├── CONTRACTS.md        ← Agreed interfaces
+├── ARCHITECTURE.md     ← Design doc submission
 ├── gateway/
-│   ├── index.js        ← P2's component
+│   ├── index.js        ← P2's component (WebSocket Handler)
 │   ├── package.json
 │   └── Dockerfile
-├── replica1/           ← P1 + P3's components (same code, different env)
+├── replica1/           ← P1 + P3's components (RAFT Implementation)
 ├── replica2/
 ├── replica3/
-└── frontend/
-    └── index.html      ← P4's component
+└── frontend/           ← P4's component (Fully redesigned Glassmorphic Dashboard)
+    ├── index.html
+    ├── style.css
+    └── app.js
 ```
-
-## Week 1 Exit Gates
-
-- [ ] `docker-compose up` starts all 4 services with no crashes
-- [ ] Each service prints a startup log line
-- [ ] `GET http://localhost:3001/status` returns `{"id":"r1","role":"follower",...}`
-- [ ] `GET http://localhost:3002/status` returns `{"id":"r2","role":"follower",...}`
-- [ ] `GET http://localhost:3003/status` returns `{"id":"r3","role":"follower",...}`
-- [ ] Frontend canvas loads and connects to gateway WebSocket without error
-- [ ] Hot reload: edit `replica1/index.js`, save → container restarts automatically
-- [ ] CONTRACTS.md signed off by all 4 members
 
 ## Environment Variables
 
@@ -59,12 +61,12 @@ miniraft/
 | `PEERS` | `http://replica1:3001,...` | all services |
 | `GATEWAY_URL` | `http://gateway:3000` | replicas |
 
-## Week 2 Checklist (don't start until Week 1 gates pass)
+## Pending Implementation / What's Left
 
-- [ ] P1: Election timer fires, RequestVote RPC works, leader elected
-- [ ] P1: AppendEntries fans out to followers, commit on majority ack
-- [ ] P2: Stroke forwarding to leader working end-to-end
-- [ ] P2: Gateway redetects leader after failover, no client disconnect
-- [ ] P3: Follower AppendEntries handler validates prevLogIndex
-- [ ] P3: /sync-log sends missing entries to rejoining node
-- [ ] P4: Multi-tab stroke consistency verified (3 tabs, identical canvas)
+Implementation for the core logic (Leader elections, AppendEntries RPC, Gateway WS forwarding, and Frontend Real-Time syncing logs) are complete! The following goals are left for final iteration prior to project wrap-up:
+
+- **Blue-Green Replica Replacement**: Demonstrating zero-downtime hot reloading of existing replicas.
+- **Failover Correctness Auditing**: Verifying that multi-client stroke syncing remains totally identical under extreme cluster conditions.
+- **Bonus Feature (Optional)**: Implementing network partition simulation (split-brain).
+- **Bonus Feature (Optional)**: Vector-based undo/redo using log compensation.
+- **Cloud Deployment**: Deploying the Docker cluster to AWS EC2 or Google Cloud VMs.
