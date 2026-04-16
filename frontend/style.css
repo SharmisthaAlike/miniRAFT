@@ -343,7 +343,7 @@ canvas {
   background: rgba(255,255,255,0.2);
 }
 
-#clear-btn {
+.action-btn {
   background: rgba(255, 255, 255, 0.1);
   border: none;
   color: var(--text-main);
@@ -356,7 +356,11 @@ canvas {
   transition: all 0.2s ease;
 }
 
-#clear-btn:hover {
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.action-btn.error-btn:hover {
   background: rgba(239, 68, 68, 0.8);
   color: white;
 }

@@ -14,6 +14,8 @@ const container = document.getElementById("canvas-container");
 const connectionBadge = document.getElementById("connection-badge");
 const dockStats = document.getElementById("dock-stats");
 const clearBtn = document.getElementById("clear-btn");
+const undoBtn = document.getElementById("undo-btn");
+const redoBtn = document.getElementById("redo-btn");
 const gatewayLog = document.getElementById("gateway-log");
 const toastContainer = document.getElementById("toast-container");
 
@@ -22,6 +24,9 @@ let drawing = false;
 let lastX = 0, lastY = 0;
 let currentColor = "#1d1d1d";
 let strokeCount = 0;
+let activeStrokes = [];   // Master list of all synchronized strokes
+let myActiveStrokes = []; // Local stack of IDs we drew (to undo)
+let myUndoneStrokes = []; // Local stack of IDs we undid (to redo)
 const clientId = "client-" + Math.random().toString(36).slice(2, 8);
 let ws = null;
 
@@ -109,6 +114,17 @@ function connect() {
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
 
+    if (msg.type === "init_canvas") {
+      activeStrokes = msg.log.map(s => ({...s, action: s.action || 'draw'}));
+      // Rebuild local stack instances to allow Undo for late joiners!
+      myActiveStrokes = activeStrokes.filter(s => s.clientId === clientId && !s.undone && s.action === 'draw').map(s => s.id);
+      myUndoneStrokes = activeStrokes.filter(s => s.clientId === clientId && s.undone && s.action === 'draw').map(s => s.id);
+      
+      redrawCanvas();
+      updateLog(`Canvas synced! Bootstrapped ${activeStrokes.length} historical vector actions.`);
+      showToast("Canvas History Synced", "success");
+    }
+
     if (msg.type === "connected") {
       updateLog(`Cluster leader is ${msg.leaderId || 'unknown'} (Term ${msg.term})`);
     }
@@ -119,8 +135,28 @@ function connect() {
     }
 
     if (msg.type === "stroke_committed") {
-      drawStroke(msg.stroke);
-      strokeCount++;
+      // Opaque log compensation handling
+      const s = msg.stroke;
+      if (s.action === "clear") {
+        activeStrokes = [];
+        redrawCanvas();
+        showToast("Canvas was cleared globally", "warning");
+      } else if (s.action === "undo") {
+        const target = activeStrokes.find(x => x.id === s.targetId);
+        if (target) target.undone = true;
+        redrawCanvas();
+      } else if (s.action === "redo") {
+        const target = activeStrokes.find(x => x.id === s.targetId);
+        if (target) target.undone = false;
+        redrawCanvas();
+      } else {
+        // Fallback or explicit 'draw'
+        const newStroke = { ...s, action: 'draw', undone: false };
+        activeStrokes.push(newStroke);
+        drawStroke(newStroke);
+      }
+      
+      strokeCount = activeStrokes.filter(x => x.action === 'draw' && !x.undone).length;
       dockStats.textContent = `Strokes: ${strokeCount}`;
     }
   };
@@ -148,16 +184,33 @@ function drawStroke(stroke) {
   ctx.stroke();
 }
 
-function sendStroke(x0, y0, x1, y1) {
+function redrawCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  activeStrokes.forEach(stroke => {
+    if (stroke.action === 'draw' && !stroke.undone) {
+      drawStroke(stroke);
+    }
+  });
+}
+
+function dispatchAction(actionObj) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify(actionObj));
+}
+
+function sendStroke(x0, y0, x1, y1) {
+  const id = crypto.randomUUID();
   const stroke = {
-    id: crypto.randomUUID(),
+    id,
+    action: "draw",
     x0: Math.round(x0), y0: Math.round(y0),
     x1: Math.round(x1), y1: Math.round(y1),
     color: currentColor,
     clientId
   };
-  ws.send(JSON.stringify(stroke));
+  myActiveStrokes.push(id);
+  myUndoneStrokes = []; // Truncate redo stack when new stroke acts
+  dispatchAction(stroke);
 }
 
 // ─── Input Handling ──────────────────────────────────────────────────────────
@@ -208,12 +261,38 @@ document.querySelectorAll(".color-btn").forEach(btn => {
   });
 });
 
+undoBtn.addEventListener("click", () => {
+  if (myActiveStrokes.length === 0) return;
+  const targetId = myActiveStrokes.pop();
+  myUndoneStrokes.push(targetId);
+  dispatchAction({
+    id: crypto.randomUUID(),
+    action: "undo",
+    targetId,
+    clientId
+  });
+});
+
+redoBtn.addEventListener("click", () => {
+  if (myUndoneStrokes.length === 0) return;
+  const targetId = myUndoneStrokes.pop();
+  myActiveStrokes.push(targetId);
+  dispatchAction({
+    id: crypto.randomUUID(),
+    action: "redo",
+    targetId,
+    clientId
+  });
+});
+
 clearBtn.addEventListener("click", () => {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // Optional: We do not broadcast clear command across network per original logic
-  // Just clear local view. 
-  strokeCount = 0;
-  dockStats.textContent = `Strokes: 0`;
+  myActiveStrokes = [];
+  myUndoneStrokes = [];
+  dispatchAction({
+    id: crypto.randomUUID(),
+    action: "clear",
+    clientId
+  });
 });
 
 // ─── Boot Mechanism ──────────────────────────────────────────────────────────
