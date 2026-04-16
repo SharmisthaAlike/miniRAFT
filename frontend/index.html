@@ -1,4 +1,197 @@
 <!DOCTYPE html>
-<html><head><title>Mini-RAFT Drawing Board — stub</title></head>
-<body><h2>Frontend stub — Person 4 builds this in Week 2</h2></body>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Mini-RAFT Drawing Board</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f172a; font-family: monospace; color: #e2e8f0; display: flex; flex-direction: column; height: 100vh; }
+  #header { padding: 10px 16px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  #header h1 { font-size: 14px; color: #94a3b8; }
+  #status-badge { font-size: 12px; padding: 3px 10px; border-radius: 20px; background: #334155; color: #94a3b8; }
+  #status-badge.leader { background: #14532d; color: #4ade80; }
+  #status-badge.no-leader { background: #7f1d1d; color: #fca5a5; }
+  #log { font-size: 11px; color: #64748b; margin-left: auto; max-width: 500px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  canvas { background: #fff; border-radius: 8px; cursor: crosshair; touch-action: none; box-shadow: 0 0 40px #0005; }
+  #toolbar { padding: 10px 16px; background: #1e293b; border-top: 1px solid #334155; display: flex; gap: 12px; align-items: center; }
+  .color-btn { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+  .color-btn.active { border-color: #fff; }
+  #clear-btn { font-size: 12px; padding: 4px 12px; background: #334155; border: none; color: #e2e8f0; border-radius: 6px; cursor: pointer; margin-left: auto; }
+  #stats { font-size: 11px; color: #64748b; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Mini-RAFT Drawing Board</h1>
+  <div id="status-badge" class="no-leader">⚡ connecting…</div>
+  <div id="log">waiting for events…</div>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="canvas" width="900" height="550"></canvas>
+</div>
+
+<div id="toolbar">
+  <span style="font-size:11px;color:#64748b">Color:</span>
+  <div class="color-btn active" style="background:#1d1d1d" data-color="#1d1d1d"></div>
+  <div class="color-btn" style="background:#ef4444" data-color="#ef4444"></div>
+  <div class="color-btn" style="background:#3b82f6" data-color="#3b82f6"></div>
+  <div class="color-btn" style="background:#22c55e" data-color="#22c55e"></div>
+  <div class="color-btn" style="background:#f59e0b" data-color="#f59e0b"></div>
+  <div class="color-btn" style="background:#a855f7" data-color="#a855f7"></div>
+  <div id="stats">strokes: 0 | clients: —</div>
+  <button id="clear-btn">Clear Canvas</button>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusBadge = document.getElementById("status-badge");
+const logEl = document.getElementById("log");
+const statsEl = document.getElementById("stats");
+
+// ── State ──────────────────────────────────────────────────────────────────
+let drawing = false;
+let lastX = 0, lastY = 0;
+let color = "#1d1d1d";
+let strokeCount = 0;
+const clientId = "client-" + Math.random().toString(36).slice(2, 8);
+
+// ── WebSocket ──────────────────────────────────────────────────────────────
+const GATEWAY = `ws://${location.hostname}:3000`;
+let ws = null;
+
+function connect() {
+  ws = new WebSocket(GATEWAY);
+
+  ws.onopen = () => {
+    setStatus("connected", "🟡 connected — finding leader…");
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === "connected") {
+      if (msg.leaderId) setStatus("leader", `✅ leader: ${msg.leaderId} (term ${msg.term})`);
+    }
+
+    if (msg.type === "leader_changed") {
+      setStatus("leader", `✅ leader: ${msg.leaderId} (term ${msg.term})`);
+      addLog(`leader changed → ${msg.leaderId}`);
+    }
+
+    if (msg.type === "stroke_committed") {
+      drawStroke(msg.stroke);
+      strokeCount++;
+      statsEl.textContent = `strokes: ${strokeCount} | clientId: ${clientId}`;
+    }
+  };
+
+  ws.onclose = () => {
+    setStatus("no-leader", "🔴 disconnected — reconnecting…");
+    setTimeout(connect, 1500); // Auto-reconnect — no visible freeze for user
+  };
+
+  ws.onerror = () => {
+    setStatus("no-leader", "🔴 connection error");
+  };
+}
+
+function setStatus(cls, text) {
+  statusBadge.className = "status-badge " + cls;
+  statusBadge.textContent = text;
+}
+
+function addLog(msg) {
+  logEl.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+}
+
+// ── Drawing ────────────────────────────────────────────────────────────────
+function drawStroke(stroke) {
+  ctx.beginPath();
+  ctx.moveTo(stroke.x0, stroke.y0);
+  ctx.lineTo(stroke.x1, stroke.y1);
+  ctx.strokeStyle = stroke.color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.stroke();
+}
+
+function sendStroke(x0, y0, x1, y1) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const stroke = {
+    id: crypto.randomUUID(),
+    x0: Math.round(x0), y0: Math.round(y0),
+    x1: Math.round(x1), y1: Math.round(y1),
+    color,
+    clientId
+  };
+  ws.send(JSON.stringify(stroke));
+  // Note: we do NOT draw locally — we wait for stroke_committed from server
+  // This ensures all clients see identical state
+}
+
+// ── Mouse Events ──────────────────────────────────────────────────────────
+canvas.addEventListener("mousedown", e => {
+  drawing = true;
+  const r = canvas.getBoundingClientRect();
+  lastX = e.clientX - r.left;
+  lastY = e.clientY - r.top;
+});
+
+canvas.addEventListener("mousemove", e => {
+  if (!drawing) return;
+  const r = canvas.getBoundingClientRect();
+  const x = e.clientX - r.left;
+  const y = e.clientY - r.top;
+  sendStroke(lastX, lastY, x, y);
+  lastX = x; lastY = y;
+});
+
+canvas.addEventListener("mouseup", () => { drawing = false; });
+canvas.addEventListener("mouseleave", () => { drawing = false; });
+
+// ── Touch Events ──────────────────────────────────────────────────────────
+canvas.addEventListener("touchstart", e => {
+  e.preventDefault();
+  drawing = true;
+  const r = canvas.getBoundingClientRect();
+  lastX = e.touches[0].clientX - r.left;
+  lastY = e.touches[0].clientY - r.top;
+});
+
+canvas.addEventListener("touchmove", e => {
+  e.preventDefault();
+  if (!drawing) return;
+  const r = canvas.getBoundingClientRect();
+  const x = e.touches[0].clientX - r.left;
+  const y = e.touches[0].clientY - r.top;
+  sendStroke(lastX, lastY, x, y);
+  lastX = x; lastY = y;
+});
+
+canvas.addEventListener("touchend", () => { drawing = false; });
+
+// ── Color picker ──────────────────────────────────────────────────────────
+document.querySelectorAll(".color-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".color-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    color = btn.dataset.color;
+  });
+});
+
+// ── Clear ─────────────────────────────────────────────────────────────────
+document.getElementById("clear-btn").addEventListener("click", () => {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  strokeCount = 0;
+  statsEl.textContent = "strokes: 0";
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────
+connect();
+</script>
+</body>
 </html>

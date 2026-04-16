@@ -1,6 +1,6 @@
 # Mini-RAFT Distributed Drawing Board — Team Documentation
 
-> **Version:** 1.0.0 | **Last Updated:** 2026-04-13 | **Status:** Week 2 Active Development
+> **Version:** 1.1.0 | **Last Updated:** 2026-04-16 | **Status:** Week 2 Active Development
 
 ---
 
@@ -131,7 +131,7 @@ RAFT is a distributed consensus protocol that ensures all replicas have the **sa
 | **Web Framework** | Express.js 4.x | Simple HTTP routing for RAFT RPCs |
 | **WebSocket** | `ws` 8.x | Binary-capable, fast WebSocket for browsers |
 | **HTTP Client (replicas)** | `axios` 1.x | Peer-to-peer RAFT RPCs between replicas |
-| **HTTP Client (gateway)** | `node-fetch` 2.x | Gateway polls replica `/status` endpoints |
+| **HTTP Client (gateway)** | `axios` 1.x | Gateway polls replica `/status` endpoints (replaces `node-fetch`; better timeout support) |
 | **Dev Hot-Reload** | `nodemon` 3.x | Auto-restarts Node on file changes |
 | **Containerization** | Docker + Docker Compose 3.9 | Runs all 4 services in isolated containers |
 | **Container Network** | Docker Bridge (`raft-net`) | Private network for inter-service communication |
@@ -157,7 +157,7 @@ minraft_gravity/
 ├── gateway/                  ← Service 1: The public-facing entry point
 │   ├── Dockerfile            ← Builds the Docker image; exposes port 3000
 │   ├── index.js              ← All gateway logic (WebSocket, leader polling, broadcast)
-│   └── package.json          ← Dependencies: express, ws, node-fetch, nodemon
+│   └── package.json          ← Dependencies: express, ws, axios, nodemon
 │
 ├── replica1/                 ← Service 2: RAFT consensus node (ID = r1)
 │   ├── Dockerfile            ← Builds replica image; exposes port 3001
@@ -175,7 +175,8 @@ minraft_gravity/
 │   └── package.json
 │
 └── frontend/                 ← Static site: the browser drawing canvas
-    └── index.html            ← Week 2: connects via WebSocket to gateway:3000
+    ├── Dockerfile            ← Serves index.html via `npx serve` on port 8080
+    └── index.html            ← Real drawing canvas; connects via WebSocket to gateway:3000
 ```
 
 ### Key Design Principle
@@ -186,8 +187,8 @@ All three replicas run **identical code**. Their identity and behavior differ on
 |---|---|---|---|---|
 | `PORT` | 3000 | 3001 | 3002 | 3003 |
 | `REPLICA_ID` | — | `r1` | `r2` | `r3` |
-| `PEERS` | All 3 replicas | r2, r3 | r1, r3 | r1, r2 |
-| `REPLICAS` (gateway) | All 3 replicas | — | — | — |
+| `PEERS` | — | r2, r3 | r1, r3 | r1, r2 |
+| `REPLICAS` | All 3 replica URLs | — | — | — |
 
 ---
 
@@ -209,20 +210,24 @@ All three replicas run **identical code**. Their identity and behavior differ on
 
 **Event: Browser → Gateway (send a stroke)**
 
+The browser sends the stroke object directly (no wrapper `type` field needed):
+
 ```json
 {
-  "type": "stroke",
-  "stroke": {
-    "id": "uuid-v4-string",
-    "x0": 120,
-    "y0": 340,
-    "x1": 125,
-    "y1": 345,
-    "color": "#e63946",
-    "width": 3,
-    "clientId": "tab-uuid"
-  }
+  "id": "uuid-v4-string",
+  "x0": 120,
+  "y0": 340,
+  "x1": 125,
+  "y1": 345,
+  "color": "#e63946",
+  "clientId": "tab-uuid"
 }
+```
+
+**Event: Gateway → Browser (on first connect)**
+
+```json
+{ "type": "connected", "leaderId": "r1", "term": 1 }
 ```
 
 **Event: Gateway → Browser (stroke was committed)**
@@ -230,7 +235,7 @@ All three replicas run **identical code**. Their identity and behavior differ on
 ```json
 {
   "type": "stroke_committed",
-  "stroke": { "id": "...", "x0": 120, "y0": 340, "x1": 125, "y1": 345, "color": "#e63946", "width": 3, "clientId": "tab-uuid" },
+  "stroke": { "id": "...", "x0": 120, "y0": 340, "x1": 125, "y1": 345, "color": "#e63946", "clientId": "tab-uuid" },
   "index": 7
 }
 ```
@@ -238,13 +243,7 @@ All three replicas run **identical code**. Their identity and behavior differ on
 **Event: Gateway → Browser (leader changed)**
 
 ```json
-{ "type": "leader_changed", "newLeader": "r2", "term": 3 }
-```
-
-**Event: Gateway → Browser (election in progress)**
-
-```json
-{ "type": "election_started", "term": 3 }
+{ "type": "leader_changed", "leaderId": "r2", "term": 3 }
 ```
 
 ---
@@ -267,8 +266,39 @@ curl -X POST http://localhost:3000/broadcast \
 
 **Response:**
 ```json
-{ "ok": true }
+{ "success": true }
 ```
+
+---
+
+#### `GET /status`
+
+**Purpose:** Returns the gateway's own health and current leader info. Useful for observability and debugging.
+
+**Example cURL:**
+```bash
+curl http://localhost:3000/status
+```
+
+**Response:**
+```json
+{
+  "service": "gateway",
+  "leader": "r1",
+  "leaderUrl": "http://replica1:3001",
+  "term": 1,
+  "clients": 2,
+  "buffered": 0
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `leader` | string \| null | ID of the currently known leader (`null` during elections) |
+| `leaderUrl` | string \| null | Internal URL the gateway is forwarding strokes to |
+| `term` | int | Last known term number |
+| `clients` | int | Number of active WebSocket browser connections |
+| `buffered` | int | Strokes queued while no leader is available |
 
 ---
 
@@ -613,15 +643,14 @@ All services use `nodemon` inside Docker with bind mounts. This means:
 The system does **not** use a traditional load balancer (like nginx or HAProxy). Instead, the **gateway implements intelligent leader-aware routing**:
 
 ```
-Every 200ms:
-  for each replica URL in [replica1:3001, replica2:3002, replica3:3003]:
-    GET /status
-    if response.role === "leader":
-      remember this URL as currentLeaderUrl
-      stop checking (break)
+Every 200ms (parallel, using Promise.allSettled):
+  Query ALL replicas' GET /status simultaneously
+  First result where role === "leader" AND term >= currentTerm wins
+  → update currentLeaderUrl, currentLeaderId, currentTerm
 
 When a stroke arrives:
-  POST stroke → currentLeaderUrl/submit-stroke
+  if currentLeaderUrl is set → POST stroke → currentLeaderUrl/submit-stroke
+  if no leader yet           → push stroke into strokeBuffer (queue)
 ```
 
 ### Why Not Round-Robin?
@@ -637,15 +666,16 @@ Round-robin would send writes to any replica — including followers. In RAFT, *
 ```
 1. Leader crashes
 2. Next poll cycle (200ms): no replica reports role = "leader"
-3. Gateway sets currentLeaderUrl = null
-4. Gateway broadcasts { type: "election_started" } to all browser clients
+3. Gateway sets currentLeaderUrl = null, logs LEADER_LOST
+4. All incoming strokes are pushed into strokeBuffer (not dropped)
 5. Remaining replicas vote; new leader elected in ~500–800ms
-6. Next poll cycle: new leader found
-7. Gateway broadcasts { type: "leader_changed", newLeader: "r2" }
-8. All subsequent strokes routed to r2
+6. Next poll cycle: new leader found, gateway logs LEADER_CHANGED
+7. Gateway broadcasts { type: "leader_changed", leaderId: "r2", term: N }
+8. strokeBuffer is flushed to the new leader in order
+9. All subsequent strokes routed to r2
 ```
 
-> **Note:** Strokes sent during the ~200–800ms election window are currently **dropped** (stroke buffering is a planned Week 2 improvement).
+> **Stroke buffering is active**: Strokes received during an election are queued and automatically flushed to the new leader — no strokes are dropped.
 
 ---
 
@@ -653,13 +683,13 @@ Round-robin would send writes to any replica — including followers. In RAFT, *
 
 | # | Issue | Impact | Status |
 |---|---|---|---|
-| 1 | **Stroke dropped during election** | Strokes sent while no leader exists are silently discarded | Known; Week 2 fix planned (queue in gateway) |
+| 1 | ~~**Stroke dropped during election**~~ | ~~Strokes sent while no leader exists are silently discarded~~ | ✅ **Fixed (v1.1.0)** — gateway now buffers strokes and flushes to new leader |
 | 2 | **In-memory only — no persistence** | Restarting all 3 replicas simultaneously loses all data | By design (Week 1 scope) |
 | 3 | **Split vote possible** | Two replicas tie in an election; both retry with higher term | Resolved naturally via randomized election timeouts |
 | 4 | **`/submit-stroke` must only reach leader** | Calling it on a follower returns `400 { error: "not_leader" }` | Expected behavior; gateway handles routing |
 | 5 | **Simultaneous strokes from two clients** | Both committed in order by the leader; canvases end up identical | Works correctly |
 | 6 | **Rapid restarts (5 in 30s)** | Frequent elections; gateway briefly shows no leader | Recovers within ~1s each time |
-| 7 | **Frontend is a stub** | `frontend/index.html` is a placeholder until Week 2 | Expected, in-progress |
+| 7 | ~~**Frontend is a stub**~~ | ~~`frontend/index.html` is a placeholder until Week 2~~ | ✅ **Fixed (v1.1.0)** — real canvas implemented and Dockerfile corrected |
 | 8 | **`leaderCommit` not sent in heartbeats (replica implementation)** | Heartbeat body includes `leaderCommit` in contracts but the replica `sendHeartbeats()` function only sends `term` + `leaderId` | Minor inconsistency with CONTRACTS.md; low risk |
 
 ---
@@ -822,16 +852,37 @@ ws.onmessage = (event) => {
 
 ---
 
-### [Unreleased] — Week 2 — In Progress
+### [1.1.0] — 2026-04-16 — Gateway Rewrite + Frontend Fix
+
+**Changed: `gateway/index.js`**
+- Replaced serial leader polling (`for` loop + `node-fetch`) with **parallel polling** via `Promise.allSettled` — all 3 replicas are queried simultaneously (~3× faster failover detection)
+- Replaced `node-fetch` with `axios` throughout (consistent with replicas; better built-in timeout support)
+- Added **stroke buffering** (`strokeBuffer` array) — strokes received when no leader is known are queued instead of dropped; buffer is automatically flushed in order when a new leader is elected
+- Added `LEADER_LOST` event: gateway now explicitly logs and clears leader state when no replica reports `role: "leader"`
+- Added `GET /status` endpoint on the gateway itself — exposes `leader`, `leaderUrl`, `term`, `clients`, and `buffered` count for observability
+- Added WebSocket **error handler** (`ws.on("error")`) — previously missing; dead clients are now properly cleaned up
+- Gateway sends a `{ type: "connected", leaderId, term }` message to each newly connected WebSocket client
+- Updated `leader_changed` broadcast shape: field renamed from `newLeader` → `leaderId` to match `connected` event
+- Structured JSON logging (`glog()`) replaces all `console.log` calls — every event is a parseable JSON line with `ts`, `service`, and `event` fields
+
+**Changed: `gateway/package.json`**
+- Removed `node-fetch ^2.7.0`
+- Added `axios ^1.6.8`
+
+**Fixed: `frontend/Dockerfile`**
+- Previous Dockerfile tried to run `node server.js` which did not exist, causing a crash-restart loop
+- Fixed to install and use `npx serve` to correctly serve the static `index.html` on port 8080
+
+**Resolved Known Issues:** #1 (stroke buffering), #7 (frontend Dockerfile)
+
+---
+
+### [Unreleased] — Week 2 — Remaining
 
 **Planned:**
-- [ ] P2: Real stroke forwarding from gateway to leader via `POST /submit-stroke`
-- [ ] P2: Stroke buffering during elections (no more dropped strokes)
-- [ ] P2: Gateway redetects leader after failover without dropping WebSocket clients
-- [ ] P1: Full `AppendEntries` fan-out from leader to followers
+- [ ] P1: Full `AppendEntries` fan-out from leader to followers (verify under load)
 - [ ] P3: Validated follower `AppendEntries` handler (`prevLogIndex` check)
 - [ ] P3: `/sync-log` full catch-up for rejoining nodes
-- [ ] P4: Real drawing canvas in `frontend/index.html`
 - [ ] P4: Multi-tab stroke consistency test (3 tabs, all identical)
 
 ---
