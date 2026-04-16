@@ -1,8 +1,7 @@
 FROM node:20-alpine
 WORKDIR /app
-COPY package.json .
+COPY package*.json ./
 RUN npm install
-# Source is bind-mounted at runtime — COPY is only for image build fallback
+RUN npm install -g nodemon
 COPY . .
-EXPOSE 3000
 CMD ["npm", "run", "dev"]
