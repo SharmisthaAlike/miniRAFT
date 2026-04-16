@@ -41,7 +41,7 @@ function showToast(message, type = 'success') {
   toast.className = `toast ${type}`;
   toast.textContent = message;
   toastContainer.appendChild(toast);
-  
+
   setTimeout(() => {
     toast.style.animation = 'fadeOut 0.3s forwards';
     setTimeout(() => toast.remove(), 300);
@@ -69,20 +69,20 @@ async function pollCluster() {
     const roleEl = card.querySelector('.node-role');
     const termEl = card.querySelector('.stat-term');
     const logEl = card.querySelector('.stat-log');
-    
+
     try {
       const res = await fetch(replica.url, { timeout: 400 });
       if (!res.ok) throw new Error("HTTP error");
       const data = await res.json();
-      
+
       card.className = `node-card ${data.role}`;
       roleEl.textContent = data.role;
       termEl.textContent = data.term;
       logEl.textContent = data.logLength || data.logSize || data.log?.length || 0;
-      
+
       // Heartbeat pulse if leader
       if (data.role === 'leader') {
-         // UI CSS handles pulse animation automatically via .leader class
+        // UI CSS handles pulse animation automatically via .leader class
       }
     } catch (err) {
       card.className = 'node-card offline';
