@@ -1,8 +1,8 @@
 FROM node:20-alpine
 WORKDIR /app
+RUN npm install -g nodemon
 COPY package.json .
-RUN npm install
-# Source is bind-mounted at runtime — COPY is only for image build fallback
+RUN npm install --include=dev
 COPY . .
 EXPOSE 3000
-CMD ["npm", "run", "dev"]
+CMD ["nodemon", "index.js"]
