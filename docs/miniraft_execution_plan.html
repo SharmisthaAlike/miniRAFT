@@ -1,0 +1,310 @@
+
+<h2 class="sr-only">Mini-RAFT project execution plan across three weeks, broken into phases with daily tasks per person and dependency tracking.</h2>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font-sans)}
+  .wrap{padding:1rem 0}
+  .week-tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+  .tab{font-size:13px;font-weight:500;padding:6px 16px;border-radius:20px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-secondary);color:var(--color-text-secondary);cursor:pointer;transition:all .15s}
+  .tab.active{background:var(--color-text-primary);color:var(--color-background-primary);border-color:var(--color-text-primary)}
+  .week{display:none}
+  .week.active{display:block}
+  .phase{margin-bottom:20px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden}
+  .phase-header{padding:10px 14px;background:var(--color-background-secondary);border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:10px}
+  .phase-label{font-size:12px;font-weight:500;padding:2px 8px;border-radius:20px}
+  .ph-contract{background:#EEEDFE;color:#3C3489}
+  .ph-infra{background:#E1F5EE;color:#085041}
+  .ph-build{background:#FAEEDA;color:#633806}
+  .ph-harden{background:#FAECE7;color:#712B13}
+  @media(prefers-color-scheme:dark){
+    .ph-contract{background:#3C3489;color:#CECBF6}
+    .ph-infra{background:#085041;color:#9FE1CB}
+    .ph-build{background:#633806;color:#FAC775}
+    .ph-harden{background:#712B13;color:#F5C4B3}
+  }
+  .phase-title{font-size:14px;font-weight:500;color:var(--color-text-primary)}
+  .phase-days{font-size:12px;color:var(--color-text-secondary);margin-left:auto}
+  .tasks-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:0}
+  .person-col{padding:12px 14px;border-right:0.5px solid var(--color-border-tertiary)}
+  .person-col:last-child{border-right:none}
+  .person-badge{font-size:11px;font-weight:500;padding:2px 8px;border-radius:20px;display:inline-block;margin-bottom:8px}
+  .p1b{background:#EEEDFE;color:#3C3489}
+  .p2b{background:#E1F5EE;color:#085041}
+  .p3b{background:#FAEEDA;color:#633806}
+  .p4b{background:#FAECE7;color:#712B13}
+  @media(prefers-color-scheme:dark){
+    .p1b{background:#3C3489;color:#CECBF6}
+    .p2b{background:#085041;color:#9FE1CB}
+    .p3b{background:#633806;color:#FAC775}
+    .p4b{background:#712B13;color:#F5C4B3}
+  }
+  .task-item{font-size:12px;color:var(--color-text-secondary);padding:5px 0;border-bottom:0.5px solid var(--color-border-tertiary);line-height:1.4}
+  .task-item:last-child{border-bottom:none}
+  .task-item strong{display:block;font-size:12px;font-weight:500;color:var(--color-text-primary);margin-bottom:1px}
+  .blocker{margin-top:12px;padding:8px 10px;background:var(--color-background-warning);border-radius:var(--border-radius-md);font-size:12px;color:var(--color-text-warning)}
+  .blocker strong{font-weight:500}
+  .gate{margin-top:12px;padding:8px 10px;background:var(--color-background-success);border-radius:var(--border-radius-md);font-size:12px;color:var(--color-text-success)}
+  .gate strong{font-weight:500}
+  .contracts{padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .contract-card{padding:10px 12px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:var(--color-background-secondary)}
+  .contract-card h4{font-size:12px;font-weight:500;color:var(--color-text-primary);margin-bottom:4px}
+  .contract-card p{font-size:11px;color:var(--color-text-secondary);line-height:1.5}
+  code{font-family:var(--font-mono);font-size:11px;background:var(--color-background-secondary);padding:1px 4px;border-radius:3px;border:0.5px solid var(--color-border-tertiary)}
+</style>
+<div class="wrap">
+  <div class="week-tabs">
+    <button class="tab active" onclick="showWeek(0)">Week 1 — Contracts</button>
+    <button class="tab" onclick="showWeek(1)">Week 2 — Build</button>
+    <button class="tab" onclick="showWeek(2)">Week 3 — Harden + Demo</button>
+  </div>
+
+  <div class="week active" id="w0">
+    <div class="phase">
+      <div class="phase-header">
+        <span class="phase-label ph-contract">Day 1–2</span>
+        <span class="phase-title">All 4 together — agree on contracts before anyone writes code</span>
+      </div>
+      <div style="padding:14px">
+        <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:12px;line-height:1.6">This is the most important session of the entire project. Every interface between your components must be pinned down here so nobody has to wait on anyone else later. Spend a full session (2–3 hrs) on this together.</p>
+        <div class="contracts">
+          <div class="contract-card">
+            <h4>Stroke message format</h4>
+            <p>Agree on the JSON shape a stroke takes. Example:<br><code>{"id","x0","y0","x1","y1","color","clientId"}</code><br>P1, P2, P4 all depend on this.</p>
+          </div>
+          <div class="contract-card">
+            <h4>RPC endpoint shapes</h4>
+            <p>Pin <code>POST /request-vote</code>, <code>POST /append-entries</code>, <code>POST /heartbeat</code>, <code>POST /sync-log</code> — request + response JSON for each. P1 implements, P2 + P3 call them.</p>
+          </div>
+          <div class="contract-card">
+            <h4>Leader advertisement</h4>
+            <p>How does Gateway know who the leader is? Agree on one mechanism: replicas expose <code>GET /status</code> returning <code>{"leader","term","id"}</code>. P1 implements, P2 polls it.</p>
+          </div>
+          <div class="contract-card">
+            <h4>Gateway → client WebSocket events</h4>
+            <p>Agree on event names and shapes. Example: <code>stroke_committed</code>, <code>leader_changed</code>. P2 emits, P4 consumes.</p>
+          </div>
+          <div class="contract-card">
+            <h4>Replica IDs + ports</h4>
+            <p>Fix replica IDs (<code>r1, r2, r3</code>), ports (<code>3001, 3002, 3003</code>), gateway port (<code>3000</code>). P3 sets these in docker-compose, everyone else hardcodes nothing — reads from env.</p>
+          </div>
+          <div class="contract-card">
+            <h4>Log entry schema</h4>
+            <p>What goes in a log entry: <code>{"index","term","stroke"}</code>. P1 owns this, but P3's sync-log and P2's broadcast both depend on it.</p>
+          </div>
+        </div>
+        <div class="gate"><strong>Exit gate:</strong> One shared doc (Google Doc or repo README) with all 6 contracts written and signed off by all 4. Nobody writes production code until this exists.</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-header">
+        <span class="phase-label ph-infra">Day 3–4</span>
+        <span class="phase-title">Skeleton — repo structure, stubs, docker baseline</span>
+      </div>
+      <div class="tasks-grid">
+        <div class="person-col">
+          <span class="person-badge p1b">P1 — RAFT core</span>
+          <div class="task-item"><strong>Stub out replica server</strong>Pick language (Node/Go/Python). Create HTTP server with empty route handlers for all 4 RPCs. Returns 200 with dummy JSON matching the contract.</div>
+          <div class="task-item"><strong>State object</strong>Define in-memory state: <code>currentTerm, votedFor, log[], commitIndex, role, leaderId</code></div>
+          <div class="task-item"><strong>GET /status stub</strong>Returns <code>{id, role:"follower", term:0, leader:null}</code></div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p2b">P2 — Gateway</span>
+          <div class="task-item"><strong>Stub out gateway server</strong>WebSocket server accepts connections. On any message, logs it and does nothing yet.</div>
+          <div class="task-item"><strong>Leader poller stub</strong>Loop every 200ms, calls <code>/status</code> on all 3 replicas, picks leader. Logs result. No forwarding yet.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p3b">P3 — Infra</span>
+          <div class="task-item"><strong>docker-compose.yml</strong>All 4 containers defined. Bind mounts wired. Shared network. Env vars for replica IDs and peer URLs. Ports exposed.</div>
+          <div class="task-item"><strong>Hot reload verified</strong>Edit a file in /replica1 → container restarts automatically. Prove it works before P1 starts real logic.</div>
+          <div class="task-item"><strong>Dockerfiles</strong>One per service. Minimal, working. Uses nodemon or air for dev mode.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p4b">P4 — Frontend</span>
+          <div class="task-item"><strong>HTML canvas page</strong>Blank canvas renders. Mouse draw events fire and log to console. WebSocket connects to gateway (even if gateway is a stub).</div>
+          <div class="task-item"><strong>Stroke serialization</strong>Convert mousedown→mousemove into stroke JSON matching the agreed format.</div>
+        </div>
+      </div>
+      <div style="padding:0 14px 12px">
+        <div class="gate"><strong>Exit gate (end of Day 4):</strong> <code>docker-compose up</code> brings all 4 services up cleanly. Each prints a startup log line. No crashes. P4 canvas connects to gateway WebSocket without error. The stubs mean nobody is blocked on anyone else's real logic.</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-header">
+        <span class="phase-label ph-infra">Day 5–7</span>
+        <span class="phase-title">Week 1 deliverables — design doc + diagram + API spec</span>
+      </div>
+      <div class="tasks-grid">
+        <div class="person-col">
+          <span class="person-badge p1b">P1</span>
+          <div class="task-item"><strong>RAFT state diagram</strong>Draw Follower → Candidate → Leader transitions with conditions. Submit as part of architecture doc.</div>
+          <div class="task-item"><strong>Election + log replication design</strong>Write the 1-page section on how your election and AppendEntries will work.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p2b">P2</span>
+          <div class="task-item"><strong>Cluster diagram</strong>Draw the 4-container architecture: browser → gateway → replicas. Show all communication arrows.</div>
+          <div class="task-item"><strong>API spec: VoteRequest + Heartbeat</strong>Write request/response JSON for these two endpoints in the shared doc.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p3b">P3</span>
+          <div class="task-item"><strong>Failure scenarios list</strong>Document at least 6 failure cases: leader crash, network delay, split vote, restart mid-draw, two simultaneous clients, rapid restarts.</div>
+          <div class="task-item"><strong>API spec: AppendEntries + SyncLog</strong>Write request/response JSON for these two endpoints.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p4b">P4</span>
+          <div class="task-item"><strong>Review all API specs</strong>You'll be testing these endpoints — read every contract and flag anything ambiguous now, not in Week 2.</div>
+          <div class="task-item"><strong>Test plan draft</strong>List what scenarios you'll test in Week 3: failover, consistency, hot-reload, chaos. Map each to how you'll trigger it.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="week" id="w1">
+    <div class="phase">
+      <div class="phase-header">
+        <span class="phase-label ph-build">Day 8–10</span>
+        <span class="phase-title">Core logic — parallel, no blocking</span>
+      </div>
+      <div class="tasks-grid">
+        <div class="person-col">
+          <span class="person-badge p1b">P1 — RAFT core</span>
+          <div class="task-item"><strong>Election timer</strong>Follower starts random 500–800ms timer. On expiry → become Candidate, increment term, request votes from peers.</div>
+          <div class="task-item"><strong>RequestVote handler</strong>Grant vote if term is higher and haven't voted this term. Respond with <code>{term, voteGranted}</code>.</div>
+          <div class="task-item"><strong>Become leader</strong>On majority votes → set role to Leader. Start heartbeat loop at 150ms.</div>
+          <div class="task-item"><strong>AppendEntries (leader side)</strong>On incoming stroke: append to log, fan out AppendEntries to both followers, wait for acks, commit when majority respond.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p2b">P2 — Gateway</span>
+          <div class="task-item"><strong>Leader poller live</strong>Poll <code>/status</code> on replicas every 200ms. Track current leader. Re-poll immediately on any non-200 from leader.</div>
+          <div class="task-item"><strong>Stroke forwarding</strong>On WebSocket message from browser: POST stroke to leader's <code>/append-entries</code>.</div>
+          <div class="task-item"><strong>Committed stroke broadcast</strong>Leader calls gateway's <code>POST /broadcast</code> (or gateway polls — agree which). Gateway fans out to all connected WebSocket clients.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p3b">P3 — Infra</span>
+          <div class="task-item"><strong>AppendEntries (follower side)</strong>Receive AppendEntries: validate term + prevLogIndex. Append entry to log. Respond with <code>{success, logLength}</code>.</div>
+          <div class="task-item"><strong>Heartbeat handler</strong>Reset election timer on valid heartbeat. Drop if term is stale.</div>
+          <div class="task-item"><strong>/sync-log endpoint</strong>Accept <code>{fromIndex}</code>. Return all committed entries from that index onward.</div>
+          <div class="task-item"><strong>Catch-up on restart</strong>On first AppendEntries with prevLogIndex mismatch: respond with current log length. Receive sync-log response, append all missing entries.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p4b">P4 — Frontend</span>
+          <div class="task-item"><strong>Draw + send</strong>Canvas strokes POST to gateway via WebSocket. No double-draw — only render what comes back from committed broadcast.</div>
+          <div class="task-item"><strong>Receive + paint</strong>On <code>stroke_committed</code> WebSocket event: draw the stroke on canvas. Works for both own strokes and remote ones.</div>
+          <div class="task-item"><strong>Multi-tab test</strong>Open 2 tabs manually. Draw in one. Verify the stroke appears in both via the gateway broadcast path.</div>
+        </div>
+      </div>
+      <div style="padding:0 14px 12px">
+        <div class="blocker"><strong>Watch out:</strong> P2 needs P1's <code>/status</code> endpoint to return real leader info. If P1 isn't ready, P2 can hardcode <code>r1</code> as leader temporarily — but agree on this explicitly and revert it as soon as P1's election works.</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-header">
+        <span class="phase-label ph-build">Day 11–14</span>
+        <span class="phase-title">Integration — connect the pipes and verify end-to-end</span>
+      </div>
+      <div class="tasks-grid">
+        <div class="person-col">
+          <span class="person-badge p1b">P1</span>
+          <div class="task-item"><strong>Election under real load</strong>Kill a replica manually. Verify remaining two elect a new leader within 1–2 seconds. Watch logs for term increments.</div>
+          <div class="task-item"><strong>Stale leader detection</strong>If a new leader is elected, old leader receiving a heartbeat/vote with higher term must step down to Follower immediately.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p2b">P2</span>
+          <div class="task-item"><strong>Failover routing</strong>Kill the current leader. Verify gateway detects new leader (via /status polling) and routes subsequent strokes there. No client disconnect.</div>
+          <div class="task-item"><strong>Buffering during election</strong>If no leader is found for &lt;2s, buffer incoming strokes and replay them once a leader is confirmed.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p3b">P3</span>
+          <div class="task-item"><strong>Restart + catch-up test</strong>Stop replica 3. Draw 5 strokes in the system. Restart replica 3. Verify it calls /sync-log and recovers all 5 entries. Check log matches leader.</div>
+          <div class="task-item"><strong>Hot-reload test</strong>Edit a file in /replica2. Verify container restarts, rejoins cluster, catches up. No client disconnection.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p4b">P4</span>
+          <div class="task-item"><strong>3-client consistency test</strong>Open 3 tabs. Draw rapidly from all three. After 30s, all canvases must show identical strokes in identical order. Screenshot and diff.</div>
+          <div class="task-item"><strong>Failover UX test</strong>Kill leader mid-draw. Verify canvas doesn't freeze or corrupt. Strokes drawn during election should either commit or be visibly pending, never silently dropped.</div>
+        </div>
+      </div>
+      <div style="padding:0 14px 12px">
+        <div class="gate"><strong>Exit gate (end of Week 2):</strong> Full end-to-end works: browser draw → gateway → leader → replicas → committed → broadcast → all canvases updated. Leader election works when you kill a container. Restarted replica catches up.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="week" id="w2">
+    <div class="phase">
+      <div class="phase-header">
+        <span class="phase-label ph-harden">Day 15–17</span>
+        <span class="phase-title">Harden — edge cases, reliability, zero-downtime</span>
+      </div>
+      <div class="tasks-grid">
+        <div class="person-col">
+          <span class="person-badge p1b">P1</span>
+          <div class="task-item"><strong>Split vote handling</strong>Simulate two candidates in same term. Verify both restart election with incremented term. No infinite loop.</div>
+          <div class="task-item"><strong>Higher-term rule</strong>Any RPC arriving with term &gt; currentTerm must cause node to immediately revert to Follower and update term.</div>
+          <div class="task-item"><strong>Safety: no overwrite</strong>Verify committed entries are never overwritten even if a new leader is elected. Test by restarting the leader after it commits.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p2b">P2</span>
+          <div class="task-item"><strong>Rapid failover</strong>Kill and restart the leader 5 times in 30 seconds. Gateway must never drop a client WebSocket. Strokes must not be lost (or are clearly surfaced as pending).</div>
+          <div class="task-item"><strong>Observability</strong>Gateway logs every leader change event with timestamp and new leader ID.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p3b">P3</span>
+          <div class="task-item"><strong>Blue-green swap</strong>Replace replica1 entirely (docker-compose stop + rm + up). New container joins cluster, catches up via sync-log, participates in elections. No downtime.</div>
+          <div class="task-item"><strong>Observability</strong>Every replica logs: current role, term number, and commit index once per second. Helps diagnose issues during demo.</div>
+        </div>
+        <div class="person-col">
+          <span class="person-badge p4b">P4</span>
+          <div class="task-item"><strong>Chaos test</strong>Script: kill random replica every 10s for 2 minutes while 3 clients draw continuously. At the end, verify all canvases match. Document results.</div>
+          <div class="task-item"><strong>Stress test</strong>100 strokes/sec from a single client for 30s. Check: no memory leak, no crash, commit latency stays reasonable.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-header">
+        <span class="phase-label ph-harden">Day 18–19</span>
+        <span class="phase-title">Demo prep — script the video, rehearse the viva</span>
+      </div>
+      <div style="padding:14px">
+        <p style="font-size:13px;color:var(--color-text-secondary);margin-bottom:12px;line-height:1.6">The video must be 8–10 minutes. Script it as 6 scenes, each showing one thing clearly.</p>
+        <div class="contracts">
+          <div class="contract-card"><h4>Scene 1 — Normal drawing (P4 records)</h4><p>3 browser tabs open. Draw from all three. Show strokes appearing on all canvases in real time.</p></div>
+          <div class="contract-card"><h4>Scene 2 — Kill the leader (P1 explains)</h4><p>Show replica logs → identify leader → kill it → show election in logs → new leader elected → drawing continues.</p></div>
+          <div class="contract-card"><h4>Scene 3 — Automatic failover (P2 explains)</h4><p>Gateway log shows leader change event. Strokes drawn during election either committed or replayed. No client disconnect.</p></div>
+          <div class="contract-card"><h4>Scene 4 — Hot reload (P3 records)</h4><p>Edit a file in replica2 → container restarts in logs → sync-log fires → replica2 back in cluster → drawing still works.</p></div>
+          <div class="contract-card"><h4>Scene 5 — Consistent state after restart (P3+P4)</h4><p>Stop replica3, draw 10 strokes, restart it. Show sync-log firing. Show replica3's log now matches leader. Compare canvas.</p></div>
+          <div class="contract-card"><h4>Scene 6 — Chaos (P4 explains)</h4><p>Run the chaos script. Show system surviving. All 3 canvases identical at the end.</p></div>
+        </div>
+        <div style="margin-top:12px;padding:10px 12px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:var(--color-background-secondary)">
+          <p style="font-size:13px;font-weight:500;color:var(--color-text-primary);margin-bottom:6px">Viva prep — each person must be able to answer:</p>
+          <p style="font-size:12px;color:var(--color-text-secondary);line-height:1.6">P1: How does election work? What prevents two leaders? What's a split vote?<br>P2: How does gateway detect failover? How are strokes buffered? What prevents client disconnect?<br>P3: Walk through the catch-up protocol step by step. What does sync-log send? How does the follower know what it's missing?<br>P4: How do you verify canvas consistency? What does your chaos test do? How did you find bugs?</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-header">
+        <span class="phase-label ph-harden">Day 20–21</span>
+        <span class="phase-title">Final — submission packaging</span>
+      </div>
+      <div style="padding:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="contract-card"><h4>P1 submits</h4><p>Replica state machine code. Election + replication logs from a real test run showing term changes and commits.</p></div>
+        <div class="contract-card"><h4>P2 submits</h4><p>Gateway code. Leader-change log from a failover run. WebSocket session count staying stable through 3 leader changes.</p></div>
+        <div class="contract-card"><h4>P3 submits</h4><p>docker-compose.yml + Dockerfiles. sync-log endpoint code. Screenshot of replica catching up after restart.</p></div>
+        <div class="contract-card"><h4>P4 submits</h4><p>Frontend code. Chaos test script + results. 3-way canvas consistency proof (screenshots or screen recording). Demo video.</p></div>
+      </div>
+      <div style="padding:0 14px 12px">
+        <div class="gate"><strong>Architecture doc:</strong> P1 writes RAFT section, P2 writes gateway + WebSocket section, P3 writes Docker + catch-up section, P4 writes testing methodology. Each ~half a page. Total = 2–3 pages as required.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function showWeek(n){
+  document.querySelectorAll('.week').forEach((w,i)=>w.classList.toggle('active',i===n));
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===n));
+}
+</script>

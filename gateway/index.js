@@ -145,7 +145,7 @@ function broadcast(msg) {
 }
 
 // ─── WebSocket: accept browser connections ────────────────────────────────────
-wss.on("connection", (ws) => {
+wss.on("connection", async (ws) => {
   clients.add(ws);
   glog("CLIENT_CONNECTED", { total: clients.size });
 
@@ -154,6 +154,24 @@ wss.on("connection", (ws) => {
     leaderId: currentLeaderId,
     term: currentTerm
   }));
+
+  // Fetch full log for late-joiner canvas initialization
+  if (currentLeaderUrl) {
+    try {
+      const { data } = await axios.get(`${currentLeaderUrl}/log`, { timeout: 1000 });
+      // Only send entries that have been fully committed by the raft majority
+      const committedStrokes = data.log
+        .filter(e => e && e.index <= data.commitIndex && e.stroke)
+        .map(e => ({ stroke: e.stroke, index: e.index }));
+      
+      ws.send(JSON.stringify({
+        type: "init_canvas",
+        log: committedStrokes
+      }));
+    } catch (err) {
+      glog("FETCH_LOG_FAILED", { error: err.message });
+    }
+  }
 
   ws.on("message", async (raw) => {
     try {

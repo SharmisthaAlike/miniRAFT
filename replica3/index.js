@@ -328,6 +328,7 @@ app.post("/submit-stroke", async (req, res) => {
 
 // ─── /status: polled by gateway for leader discovery ─────────────────────────
 app.get("/status", (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
   res.json({
     id: REPLICA_ID,
     role: state.role,
