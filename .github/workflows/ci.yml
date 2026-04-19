@@ -9,22 +9,23 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
-        node-version: '18'
-        cache: 'npm'
+        node-version: '20'
 
     - name: Install dependencies
       run: npm install
 
     - name: Start Docker Compose services
-      run: docker-compose up -d
+      run: docker compose up -d --build
 
     - name: Wait for services to be ready
       run: |
@@ -40,4 +41,4 @@ jobs:
 
     - name: Stop Docker Compose services
       if: always()
-      run: docker-compose down
+      run: docker compose down --remove-orphans
