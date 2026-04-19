@@ -29,6 +29,12 @@ let myActiveStrokes = []; // Local stack of IDs we drew (to undo)
 let myUndoneStrokes = []; // Local stack of IDs we undid (to redo)
 const clientId = "client-" + Math.random().toString(36).slice(2, 8);
 let ws = null;
+const MAX_DOCK_LOG_LINES = 120;
+const MAX_STROKE_FPS = 60;
+const MIN_SEGMENT_DISTANCE_PX = 1.5;
+let queuedPoint = null;
+let frameScheduled = false;
+let lastStrokeSentAt = 0;
 
 // ─── Canvas Resizing Setup ───────────────────────────────────────────────────
 function resizeCanvas() {
@@ -58,6 +64,9 @@ function updateLog(msg) {
   line.className = 'log-line';
   line.textContent = `> ${msg}`;
   gatewayLog.appendChild(line);
+  while (gatewayLog.childElementCount > MAX_DOCK_LOG_LINES) {
+    gatewayLog.removeChild(gatewayLog.firstChild);
+  }
   gatewayLog.scrollTop = gatewayLog.scrollHeight;
 }
 
@@ -227,19 +236,61 @@ function startDrawing(e) {
   const { x, y } = getCoordinates(e);
   lastX = x;
   lastY = y;
+  queuedPoint = null;
+  frameScheduled = false;
+  lastStrokeSentAt = 0;
 }
 
 function moveDrawing(e) {
   if (!drawing) return;
   const { x, y } = getCoordinates(e);
-  // Send over network; Wait for backend stroke_committed broadcast before drawing locally
+  queuedPoint = { x, y };
+  if (!frameScheduled) {
+    frameScheduled = true;
+    requestAnimationFrame(flushQueuedStroke);
+  }
+}
+
+function flushQueuedStroke(ts) {
+  frameScheduled = false;
+  if (!drawing || !queuedPoint) return;
+
+  const frameIntervalMs = 1000 / MAX_STROKE_FPS;
+  if (ts - lastStrokeSentAt < frameIntervalMs) {
+    frameScheduled = true;
+    requestAnimationFrame(flushQueuedStroke);
+    return;
+  }
+
+  const { x, y } = queuedPoint;
+  queuedPoint = null;
+
+  const dx = x - lastX;
+  const dy = y - lastY;
+  const distanceSq = (dx * dx) + (dy * dy);
+  if (distanceSq < (MIN_SEGMENT_DISTANCE_PX * MIN_SEGMENT_DISTANCE_PX)) {
+    return;
+  }
+
+  // Send over network; wait for committed broadcast before drawing locally
   sendStroke(lastX, lastY, x, y);
   lastX = x;
   lastY = y;
+  lastStrokeSentAt = ts;
+
+  if (queuedPoint) {
+    frameScheduled = true;
+    requestAnimationFrame(flushQueuedStroke);
+  }
 }
 
 function stopDrawing() {
+  if (drawing && queuedPoint) {
+    flushQueuedStroke(performance.now());
+  }
   drawing = false;
+  queuedPoint = null;
+  frameScheduled = false;
 }
 
 // Mouse

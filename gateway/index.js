@@ -14,6 +14,7 @@ const REPLICAS = (process.env.REPLICAS || "")
   .split(",")
   .filter(Boolean);
 // e.g. ["http://replica1:3001", "http://replica2:3002", "http://replica3:3003"]
+const VERBOSE_LOGS = process.env.VERBOSE_LOGS === "1";
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let currentLeaderUrl = null;
@@ -21,9 +22,16 @@ let currentLeaderId = null;
 let currentTerm = -1;
 const clients = new Set();
 const strokeBuffer = [];
+const QUIET_BY_DEFAULT_EVENTS = new Set([
+  "STROKE_RECEIVED_FROM_CLIENT",
+  "STROKE_COMMITTED",
+  "BROADCAST_SENT",
+  "STROKE_BUFFERED"
+]);
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
 function glog(event, details = {}) {
+  if (!VERBOSE_LOGS && QUIET_BY_DEFAULT_EVENTS.has(event)) return;
   console.log(JSON.stringify({
     ts: new Date().toISOString(),
     service: "gateway",

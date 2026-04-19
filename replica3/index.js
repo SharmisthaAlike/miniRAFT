@@ -10,6 +10,18 @@ const PORT = parseInt(process.env.PORT || "3001");
 const PEERS = (process.env.PEERS || "")
   .split(",")
   .filter(Boolean);
+const VERBOSE_LOGS = process.env.VERBOSE_LOGS === "1";
+const QUIET_BY_DEFAULT_EVENTS = new Set([
+  "VOTE_GRANTED",
+  "VOTE_DENIED",
+  "VOTE_RECEIVED",
+  "ENTRY_APPENDED",
+  "COMMIT_INDEX_UPDATED",
+  "STROKE_RECEIVED",
+  "ENTRY_COMMITTED",
+  "COMMIT_FAILED_NO_MAJORITY",
+  "FOLLOWER_BEHIND"
+]);
 
 // ─── RAFT State ───────────────────────────────────────────────────────────────
 const state = {
@@ -48,6 +60,7 @@ function startElection() {
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 function raftLog(event, details = {}) {
+  if (!VERBOSE_LOGS && QUIET_BY_DEFAULT_EVENTS.has(event)) return;
   console.log(JSON.stringify({
     ts: new Date().toISOString(),
     id: REPLICA_ID,
@@ -60,13 +73,34 @@ function raftLog(event, details = {}) {
 
 // ─── State Transitions ────────────────────────────────────────────────────────
 function becomeFollower(term, leaderId = null) {
-  const prev = state.role;
-  state.currentTerm = term;
-  state.votedFor = null;
+  const prevRole = state.role;
+  const prevTerm = state.currentTerm;
+  const prevLeader = state.leaderId;
+
+  // Only clear vote when we observe a strictly newer term.
+  if (term > state.currentTerm) {
+    state.votedFor = null;
+  }
+
+  state.currentTerm = Math.max(state.currentTerm, term);
   state.role = "follower";
   state.leaderId = leaderId;
   state.votesReceived = 0;
-  raftLog("TRANSITION_TO_FOLLOWER", { from: prev, newLeader: leaderId });
+
+  // Avoid heartbeat-level log spam; log only on meaningful transition/state change.
+  const changed =
+    prevRole !== "follower" ||
+    prevTerm !== state.currentTerm ||
+    prevLeader !== leaderId;
+  if (changed) {
+    raftLog("TRANSITION_TO_FOLLOWER", {
+      from: prevRole,
+      newLeader: leaderId,
+      prevTerm,
+      newTerm: state.currentTerm,
+    });
+  }
+
   stopHeartbeats();
   resetElectionTimer();
 }
@@ -263,7 +297,9 @@ async function replicateEntry(entry) {
         } else {
           // Follower rejected — step nextIndex back
           raftLog("FOLLOWER_BEHIND", { peer, theirLogLength: data.logLength });
-          nextIdx = Math.max(0, (data.logLength ?? nextIdx) - 1);
+          // Always move backward at least one slot to guarantee convergence.
+          const hinted = typeof data.logLength === "number" ? data.logLength - 1 : nextIdx - 1;
+          nextIdx = Math.max(0, Math.min(nextIdx - 1, hinted));
           state.nextIndex[peer] = nextIdx;
         }
       } catch (err) {
