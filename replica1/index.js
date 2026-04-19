@@ -4,18 +4,18 @@ const axios = require("axios");
 const app = express();
 app.use(express.json());
 
-// ─── Config (from env, set by docker-compose) ────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 const REPLICA_ID = process.env.REPLICA_ID || "r1";
 const PORT = parseInt(process.env.PORT || "3001");
 const PEERS = (process.env.PEERS || "")
   .split(",")
-  .filter(Boolean); // e.g. ["http://replica2:3002", "http://replica3:3003"]
+  .filter(Boolean);
 
-// ─── In-Memory RAFT State ─────────────────────────────────────────────────────
+// ─── RAFT State ───────────────────────────────────────────────────────────────
 const state = {
   currentTerm: 0,
   votedFor: null,
-  log: [],              // [{index, term, stroke}]
+  log: [],
   commitIndex: -1,
   lastApplied: -1,
   nextIndex: {},
@@ -29,7 +29,7 @@ const state = {
 let electionTimer = null;
 
 function randomTimeout() {
-  return 500 + Math.floor(Math.random() * 300); // 500–800ms
+  return 500 + Math.floor(Math.random() * 300);
 }
 
 function resetElectionTimer() {
@@ -46,12 +46,16 @@ function startElection() {
   becomeCandidate();
 }
 
-// ─── Logging Helper ───────────────────────────────────────────────────────────
+// ─── Logging ──────────────────────────────────────────────────────────────────
 function raftLog(event, details = {}) {
-  const ts = new Date().toISOString();
-  console.log(
-    JSON.stringify({ ts, id: REPLICA_ID, role: state.role, term: state.currentTerm, event, ...details })
-  );
+  console.log(JSON.stringify({
+    ts: new Date().toISOString(),
+    id: REPLICA_ID,
+    role: state.role,
+    term: state.currentTerm,
+    event,
+    ...details
+  }));
 }
 
 // ─── State Transitions ────────────────────────────────────────────────────────
@@ -90,7 +94,7 @@ function becomeLeader() {
   startHeartbeats();
 }
 
-// ─── Election: RequestVote (outbound) ─────────────────────────────────────────
+// ─── RequestVote (outbound) ───────────────────────────────────────────────────
 async function requestVotesFromPeers() {
   const lastLogIndex = state.log.length - 1;
   const lastLogTerm = lastLogIndex >= 0 ? state.log[lastLogIndex].term : -1;
@@ -150,15 +154,20 @@ function startHeartbeats() {
   clearInterval(heartbeatInterval);
   heartbeatInterval = setInterval(sendHeartbeats, 150);
 }
+
 function stopHeartbeats() {
   clearInterval(heartbeatInterval);
 }
+
 async function sendHeartbeats() {
   if (state.role !== "leader") { stopHeartbeats(); return; }
   const promises = PEERS.map(async (peer) => {
     try {
-      const { data } = await axios.post(`${peer}/heartbeat`,
-        { term: state.currentTerm, leaderId: REPLICA_ID }, { timeout: 200 });
+      const { data } = await axios.post(
+        `${peer}/heartbeat`,
+        { term: state.currentTerm, leaderId: REPLICA_ID },
+        { timeout: 200 }
+      );
       if (data.term > state.currentTerm) { becomeFollower(data.term); stopHeartbeats(); }
     } catch (err) {
       raftLog("HEARTBEAT_FAILED", { peer, error: err.message });
@@ -186,6 +195,7 @@ app.post("/heartbeat", (req, res) => {
 // ─── AppendEntries RPC (inbound) ──────────────────────────────────────────────
 app.post("/append-entries", (req, res) => {
   const { term, leaderId, prevLogIndex, prevLogTerm, entry, leaderCommit } = req.body;
+
   if (term < state.currentTerm) {
     return res.json({ term: state.currentTerm, success: false, logLength: state.log.length });
   }
@@ -204,37 +214,65 @@ app.post("/append-entries", (req, res) => {
     state.log.push(entry);
     raftLog("ENTRY_APPENDED", { index: entry.index, term: entry.term });
   }
+
   if (leaderCommit > state.commitIndex) {
     state.commitIndex = Math.min(leaderCommit, state.log.length - 1);
     raftLog("COMMIT_INDEX_UPDATED", { commitIndex: state.commitIndex });
   }
+
   res.json({ term: state.currentTerm, success: true, logLength: state.log.length });
 });
 
-// ─── Leader: fan out AppendEntries ───────────────────────────────────────────
+// ─── Replicate entry to peers (fixed: walks nextIndex back until follower agrees) ──
 async function replicateEntry(entry) {
-  const prevLogIndex = entry.index - 1;
-  const prevLogTerm = prevLogIndex >= 0 ? (state.log[prevLogIndex]?.term ?? -1) : -1;
   let acks = 1;
 
   const promises = PEERS.map(async (peer) => {
-    try {
-      const { data } = await axios.post(`${peer}/append-entries`,
-        { term: state.currentTerm, leaderId: REPLICA_ID, prevLogIndex, prevLogTerm, entry, leaderCommit: state.commitIndex },
-        { timeout: 400 });
-      if (data.term > state.currentTerm) { becomeFollower(data.term); return; }
-      if (data.success) {
-        acks++;
-        state.matchIndex[peer] = entry.index;
-        state.nextIndex[peer] = entry.index + 1;
-      } else {
-        raftLog("FOLLOWER_BEHIND", { peer, theirLogLength: data.logLength });
-        triggerCatchUp(peer, data.logLength);
+    let nextIdx = state.nextIndex[peer] ?? 0;
+    let attempts = 0;
+
+    while (attempts < 10) {
+      attempts++;
+      const prevLogIndex = nextIdx - 1;
+      const prevLogTerm = prevLogIndex >= 0 ? (state.log[prevLogIndex]?.term ?? -1) : -1;
+
+      try {
+        const { data } = await axios.post(
+          `${peer}/append-entries`,
+          {
+            term: state.currentTerm,
+            leaderId: REPLICA_ID,
+            prevLogIndex,
+            prevLogTerm,
+            entry: state.log[nextIdx],
+            leaderCommit: state.commitIndex
+          },
+          { timeout: 400 }
+        );
+
+        if (data.term > state.currentTerm) { becomeFollower(data.term); return; }
+
+        if (data.success) {
+          state.matchIndex[peer] = nextIdx;
+          state.nextIndex[peer] = nextIdx + 1;
+          if (nextIdx === entry.index) {
+            acks++;
+            break; // reached the target entry, done
+          }
+          nextIdx++; // send next missing entry
+        } else {
+          // Follower rejected — step nextIndex back
+          raftLog("FOLLOWER_BEHIND", { peer, theirLogLength: data.logLength });
+          nextIdx = Math.max(0, (data.logLength ?? nextIdx) - 1);
+          state.nextIndex[peer] = nextIdx;
+        }
+      } catch (err) {
+        raftLog("REPLICATE_FAILED", { peer, error: err.message });
+        break;
       }
-    } catch (err) {
-      raftLog("REPLICATE_FAILED", { peer, error: err.message });
     }
   });
+
   await Promise.allSettled(promises);
 
   const majority = Math.floor((PEERS.length + 1) / 2) + 1;
@@ -247,7 +285,7 @@ async function replicateEntry(entry) {
   return false;
 }
 
-// ─── Catch-Up (leader pushes missing log to follower) ────────────────────────
+// ─── Catch-Up: leader pushes missing entries to a lagging follower ────────────
 async function triggerCatchUp(peer, fromIndex) {
   try {
     const entries = state.log.slice(fromIndex).filter(e => e.index <= state.commitIndex);
@@ -258,20 +296,22 @@ async function triggerCatchUp(peer, fromIndex) {
   }
 }
 
-// ─── /sync-log (follower receives catch-up) ───────────────────────────────────
+// ─── /sync-log: follower receives catch-up entries ────────────────────────────
 app.post("/sync-log", (req, res) => {
   const { entries } = req.body;
   if (!Array.isArray(entries) || entries.length === 0)
     return res.json({ success: true, message: "nothing to sync" });
 
-  entries.forEach(entry => { if (!state.log[entry.index]) state.log[entry.index] = entry; });
+  entries.forEach(entry => {
+    if (!state.log[entry.index]) state.log[entry.index] = entry;
+  });
   const last = entries[entries.length - 1];
   state.commitIndex = Math.max(state.commitIndex, last.index);
   raftLog("SYNC_LOG_APPLIED", { count: entries.length, commitIndex: state.commitIndex });
   res.json({ success: true, applied: entries.length });
 });
 
-// ─── /submit-stroke (gateway calls this on leader) ───────────────────────────
+// ─── /submit-stroke: gateway calls this on the current leader ─────────────────
 app.post("/submit-stroke", async (req, res) => {
   if (state.role !== "leader")
     return res.status(400).json({ error: "not_leader", leaderId: state.leaderId });
@@ -286,7 +326,7 @@ app.post("/submit-stroke", async (req, res) => {
   else res.status(503).json({ error: "could_not_commit" });
 });
 
-// ─── /status (polled by gateway for leader discovery) ────────────────────────
+// ─── /status: polled by gateway for leader discovery ─────────────────────────
 app.get("/status", (req, res) => {
   res.json({
     id: REPLICA_ID,
@@ -298,7 +338,7 @@ app.get("/status", (req, res) => {
   });
 });
 
-// ─── /log (debug: see full log) ───────────────────────────────────────────────
+// ─── /log: debug endpoint to inspect full log ─────────────────────────────────
 app.get("/log", (req, res) => {
   res.json({ log: state.log, commitIndex: state.commitIndex });
 });
