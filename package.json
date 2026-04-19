@@ -1,0 +1,14 @@
+{
+  "name": "miniraft-root",
+  "version": "1.0.0",
+  "description": "Integration testing root for MiniRAFT",
+  "private": true,
+  "scripts": {
+    "test": "jest tests/integration.test.js --runInBand --detectOpenHandles --forceExit"
+  },
+  "devDependencies": {
+    "axios": "^1.6.8",
+    "jest": "^29.7.0",
+    "ws": "^8.16.0"
+  }
+}
