@@ -1,12 +1,21 @@
 const axios = require("axios");
+const http = require("http");
 const WebSocket = require("ws");
 
 const GATEWAY_URL = "http://localhost:3000";
 const WS_URL = "ws://localhost:3000";
 
+// Use a shared http agent so we can destroy it cleanly after all tests
+const agent = new http.Agent({ keepAlive: false });
+const client = axios.create({ httpAgent: agent });
+
+afterAll(() => {
+  agent.destroy();
+});
+
 describe("MiniRAFT Integration Tests", () => {
   it("Gateway should be healthy", async () => {
-    const response = await axios.get(`${GATEWAY_URL}/status`);
+    const response = await client.get(`${GATEWAY_URL}/status`);
     expect(response.status).toBe(200);
     expect(response.data.service).toBe("gateway");
   });
@@ -17,7 +26,7 @@ describe("MiniRAFT Integration Tests", () => {
     const maxAttempts = 15;
 
     while (!leader && attempts < maxAttempts) {
-      const response = await axios.get(`${GATEWAY_URL}/status`);
+      const response = await client.get(`${GATEWAY_URL}/status`);
       if (response.data.leader) {
         leader = response.data.leader;
       } else {
@@ -29,16 +38,17 @@ describe("MiniRAFT Integration Tests", () => {
     expect(leader).not.toBeNull();
   }, 20000);
 
-  it("Client can connect via WS, submit stroke, and receive commit", (done) => {
-    const ws = new WebSocket(WS_URL);
+  it("Client can connect via WS, submit stroke, and receive commit", async () => {
     const mockStrokeId = `test-stroke-${Date.now()}`;
-    let isConnected = false;
 
-    ws.on("message", (data) => {
-      const msg = JSON.parse(data.toString());
-      if (msg.type === "connected") {
-        isConnected = true;
-        // submit stroke
+    await new Promise((resolve, reject) => {
+      const ws = new WebSocket(WS_URL);
+      const timeout = setTimeout(() => {
+        ws.terminate();
+        reject(new Error(`Timed out waiting for stroke_committed for id=${mockStrokeId}`));
+      }, 10000);
+
+      ws.on("open", () => {
         ws.send(JSON.stringify({
           id: mockStrokeId,
           points: [{ x: 50, y: 50 }],
@@ -46,16 +56,25 @@ describe("MiniRAFT Integration Tests", () => {
           brushSize: 3,
           type: "draw"
         }));
-      } else if (msg.type === "stroke_committed") {
-        if (msg.stroke && msg.stroke.id === mockStrokeId) {
-          ws.close();
-          done();
-        }
-      }
-    });
+      });
 
-    ws.on("error", (err) => {
-      done(err);
+      ws.on("message", data => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === "stroke_committed" && msg.stroke && msg.stroke.id === mockStrokeId) {
+            clearTimeout(timeout);
+            ws.close();
+            resolve();
+          }
+        } catch (e) {
+          // ignore non-JSON
+        }
+      });
+
+      ws.on("error", err => {
+        clearTimeout(timeout);
+        reject(err);
+      });
     });
-  }, 10000);
+  }, 12000);
 });

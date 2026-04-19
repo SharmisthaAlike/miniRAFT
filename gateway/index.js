@@ -155,24 +155,7 @@ wss.on("connection", async (ws) => {
     term: currentTerm
   }));
 
-  // Fetch full log for late-joiner canvas initialization
-  if (currentLeaderUrl) {
-    try {
-      const { data } = await axios.get(`${currentLeaderUrl}/log`, { timeout: 1000 });
-      // Only send entries that have been fully committed by the raft majority
-      const committedStrokes = data.log
-        .filter(e => e && e.index <= data.commitIndex && e.stroke)
-        .map(e => ({ stroke: e.stroke, index: e.index }));
-      
-      ws.send(JSON.stringify({
-        type: "init_canvas",
-        log: committedStrokes
-      }));
-    } catch (err) {
-      glog("FETCH_LOG_FAILED", { error: err.message });
-    }
-  }
-
+  // Register message handler BEFORE any awaits so we never miss an early message
   ws.on("message", async (raw) => {
     try {
       const stroke = JSON.parse(raw.toString());
@@ -192,6 +175,26 @@ wss.on("connection", async (ws) => {
     glog("CLIENT_ERROR", { error: err.message });
     clients.delete(ws);
   });
+
+  // Fetch full log for late-joiner canvas initialization (AFTER registering handlers)
+  if (currentLeaderUrl) {
+    try {
+      const { data } = await axios.get(`${currentLeaderUrl}/log`, { timeout: 1000 });
+      // Only send entries that have been fully committed by the raft majority
+      const committedStrokes = data.log
+        .filter(e => e && e.index <= data.commitIndex && e.stroke)
+        .map(e => ({ stroke: e.stroke, index: e.index }));
+
+      if (ws.readyState === 1) { // only send if still connected
+        ws.send(JSON.stringify({
+          type: "init_canvas",
+          log: committedStrokes
+        }));
+      }
+    } catch (err) {
+      glog("FETCH_LOG_FAILED", { error: err.message });
+    }
+  }
 });
 
 // ─── POST /broadcast (replicas push committed strokes here) ──────────────────

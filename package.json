@@ -6,6 +6,16 @@
   "scripts": {
     "test": "jest tests/integration.test.js --runInBand --detectOpenHandles --forceExit"
   },
+  "jest": {
+    "testEnvironment": "node",
+    "modulePathIgnorePatterns": [
+      "<rootDir>/replica1/",
+      "<rootDir>/replica2/",
+      "<rootDir>/replica3/",
+      "<rootDir>/gateway/",
+      "<rootDir>/frontend/"
+    ]
+  },
   "devDependencies": {
     "axios": "^1.6.8",
     "jest": "^29.7.0",
