@@ -1,17 +1,28 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
 # Usage: ./blue-green-swap.sh replica1
 REPLICA=${1:-replica1}
+
+if docker compose version >/dev/null 2>&1; then
+	COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+	COMPOSE=(docker-compose)
+else
+	echo "docker compose or docker-compose is required" >&2
+	exit 1
+fi
 
 echo "=== Blue-Green Swap: $REPLICA ==="
 
 echo "Step 1: Stopping $REPLICA..."
-docker compose stop $REPLICA
+"${COMPOSE[@]}" stop "$REPLICA"
 
 echo "Step 2: Removing container..."
-docker compose rm -f $REPLICA
+"${COMPOSE[@]}" rm -f "$REPLICA"
 
 echo "Step 3: Starting fresh $REPLICA..."
-docker compose up -d $REPLICA
+"${COMPOSE[@]}" up -d "$REPLICA"
 
 echo "Step 4: Watching logs (Ctrl+C to stop)..."
-docker compose logs -f $REPLICA
+"${COMPOSE[@]}" logs -f "$REPLICA"

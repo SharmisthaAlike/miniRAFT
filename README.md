@@ -9,8 +9,8 @@ It features a real-time collaborative drawing board with leader election, fault 
 
 ## Quick Start
 
-### Prerequisites (macOS)
-Ensure you have Docker running. Using Colima:
+### Prerequisites
+Install Docker Desktop or Docker Engine with Compose support on macOS, Linux, or Windows. On macOS, Colima is also supported:
 ```bash
 colima start
 ```
@@ -18,13 +18,13 @@ colima start
 ### Starting the Cluster
 ```bash
 # Build and start Gateway, Frontend, and all 3 Replicas
-docker-compose up -d --build
+docker compose up -d --build
 
-# Open the Glassmorphic Frontend Dashboard
-open http://localhost:8080
+# Open the Glassmorphic Frontend Dashboard in your browser
+# http://localhost:8080
 
 # Watch replica logs in real-time
-docker-compose logs -f replica1 replica2 replica3
+docker compose logs -f replica1 replica2 replica3
 ```
 
 ### Simulating Failovers
