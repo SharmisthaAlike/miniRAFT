@@ -139,8 +139,9 @@ npm test      # runs tests/integration.test.js against live Docker cluster
 
 ---
 
-## Pending / Roadmap
+## Collaborators:
 
-- **Failover Correctness Auditing**: Multi-client stroke syncing under extreme cluster conditions
-- **Network Partition Simulation**: Split-brain scenarios (bonus)
-- **Cloud Deployment**: AWS EC2 or Google Cloud VMs
+* @SharmisthaAlike -> frontend and integration testing
+* @aadhya2811 -> blue-green and hot reload
+* @AditiUdaya -> Gateway and election
+* @pizz-beep -> main raft consensus core
