@@ -78,8 +78,17 @@ services:
     container_name: frontend
     environment:
       PORT: 8080
+      GATEWAY_TARGET: http://gateway:3000
+      REPLICA1_TARGET: http://replica1:3001
+      REPLICA2_TARGET: http://replica2:3002
+      REPLICA3_TARGET: http://replica3:3003
     ports:
       - "8080:8080"
     networks:
       - raft-net
+    depends_on:
+      - gateway
+      - replica1
+      - replica2
+      - replica3
     restart: unless-stopped
