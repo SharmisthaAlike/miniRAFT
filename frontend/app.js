@@ -1,9 +1,9 @@
 // ─── Configuration ─────────────────────────────────────────────────────────────
-const GATEWAY_WS_URL = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
+const GATEWAY_WS_URL = `ws://${location.hostname}:3000`;
 const REPLICAS = [
-  { id: 'r1', url: `/api/replicas/r1/status` },
-  { id: 'r2', url: `/api/replicas/r2/status` },
-  { id: 'r3', url: `/api/replicas/r3/status` }
+  { id: 'r1', url: `http://${location.hostname}:3001/status` },
+  { id: 'r2', url: `http://${location.hostname}:3002/status` },
+  { id: 'r3', url: `http://${location.hostname}:3003/status` }
 ];
 
 // ─── DOM Elements ────────────────────────────────────────────────────────────
