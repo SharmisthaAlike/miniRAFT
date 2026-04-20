@@ -1,8 +1,88 @@
 const express = require("express");
-const axios = require("axios");
 
 const app = express();
 app.use(express.json());
+
+const PEER_FAILURE_LOG_INTERVAL_MS = 3000;
+const peerFailureState = new Map();
+
+function formatNetworkError(err) {
+  if (!err) return "unknown error";
+  const causeCode = err.cause && err.cause.code ? err.cause.code : null;
+  if (causeCode) return `${err.message} (${causeCode})`;
+  return err.message || String(err);
+}
+
+function onPeerRpcSuccess(peer) {
+  const stateForPeer = peerFailureState.get(peer);
+  if (stateForPeer && stateForPeer.consecutiveFailures > 0) {
+    raftLog("PEER_RPC_RECOVERED", {
+      peer,
+      failures: stateForPeer.consecutiveFailures
+    });
+  }
+  peerFailureState.set(peer, {
+    consecutiveFailures: 0,
+    lastLoggedAt: 0
+  });
+}
+
+function logPeerRpcFailure(event, peer, error) {
+  const now = Date.now();
+  const stateForPeer = peerFailureState.get(peer) || {
+    consecutiveFailures: 0,
+    lastLoggedAt: 0
+  };
+
+  stateForPeer.consecutiveFailures += 1;
+
+  const shouldLog =
+    stateForPeer.consecutiveFailures === 1 ||
+    now - stateForPeer.lastLoggedAt >= PEER_FAILURE_LOG_INTERVAL_MS;
+
+  if (shouldLog) {
+    raftLog(event, {
+      peer,
+      error,
+      consecutiveFailures: stateForPeer.consecutiveFailures
+    });
+    stateForPeer.lastLoggedAt = now;
+  }
+
+  peerFailureState.set(peer, stateForPeer);
+}
+
+async function postJson(url, body, timeoutMs) {
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (err) {
+    const wrapped = new Error(formatNetworkError(err));
+    wrapped.cause = err;
+    throw wrapped;
+  }
+
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    // Keep default empty payload for non-JSON error responses.
+  }
+
+  if (!response.ok) {
+    const err = new Error(`HTTP ${response.status}`);
+    err.status = response.status;
+    err.data = data;
+    throw err;
+  }
+
+  return data;
+}
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const REPLICA_ID = process.env.REPLICA_ID || "r1";
@@ -135,11 +215,12 @@ async function requestVotesFromPeers() {
 
   const promises = PEERS.map(async (peer) => {
     try {
-      const { data } = await axios.post(
+      const data = await postJson(
         `${peer}/request-vote`,
         { term: state.currentTerm, candidateId: REPLICA_ID, lastLogIndex, lastLogTerm },
-        { timeout: 300 }
+        300
       );
+      onPeerRpcSuccess(peer);
       if (state.role !== "candidate") return;
       if (data.term > state.currentTerm) { becomeFollower(data.term); return; }
       if (data.voteGranted) {
@@ -149,7 +230,7 @@ async function requestVotesFromPeers() {
         if (state.votesReceived >= majority && state.role === "candidate") becomeLeader();
       }
     } catch (err) {
-      raftLog("VOTE_REQUEST_FAILED", { peer, error: err.message });
+      logPeerRpcFailure("VOTE_REQUEST_FAILED", peer, err.message);
     }
   });
   await Promise.allSettled(promises);
@@ -197,14 +278,15 @@ async function sendHeartbeats() {
   if (state.role !== "leader") { stopHeartbeats(); return; }
   const promises = PEERS.map(async (peer) => {
     try {
-      const { data } = await axios.post(
+      const data = await postJson(
         `${peer}/heartbeat`,
         { term: state.currentTerm, leaderId: REPLICA_ID },
-        { timeout: 200 }
+        200
       );
+      onPeerRpcSuccess(peer);
       if (data.term > state.currentTerm) { becomeFollower(data.term); stopHeartbeats(); }
     } catch (err) {
-      raftLog("HEARTBEAT_FAILED", { peer, error: err.message });
+      logPeerRpcFailure("HEARTBEAT_FAILED", peer, err.message);
     }
   });
   await Promise.allSettled(promises);
@@ -271,7 +353,7 @@ async function replicateEntry(entry) {
       const prevLogTerm = prevLogIndex >= 0 ? (state.log[prevLogIndex]?.term ?? -1) : -1;
 
       try {
-        const { data } = await axios.post(
+        const data = await postJson(
           `${peer}/append-entries`,
           {
             term: state.currentTerm,
@@ -281,8 +363,9 @@ async function replicateEntry(entry) {
             entry: state.log[nextIdx],
             leaderCommit: state.commitIndex
           },
-          { timeout: 400 }
+          400
         );
+          onPeerRpcSuccess(peer);
 
         if (data.term > state.currentTerm) { becomeFollower(data.term); return; }
 
@@ -303,7 +386,7 @@ async function replicateEntry(entry) {
           state.nextIndex[peer] = nextIdx;
         }
       } catch (err) {
-        raftLog("REPLICATE_FAILED", { peer, error: err.message });
+          logPeerRpcFailure("REPLICATE_FAILED", peer, err.message);
         break;
       }
     }
@@ -325,10 +408,11 @@ async function replicateEntry(entry) {
 async function triggerCatchUp(peer, fromIndex) {
   try {
     const entries = state.log.slice(fromIndex).filter(e => e.index <= state.commitIndex);
-    await axios.post(`${peer}/sync-log`, { entries }, { timeout: 1000 });
+    await postJson(`${peer}/sync-log`, { entries }, 1000);
+    onPeerRpcSuccess(peer);
     raftLog("SYNC_LOG_SENT", { peer, fromIndex, count: entries.length });
   } catch (err) {
-    raftLog("SYNC_LOG_FAILED", { peer, error: err.message });
+    logPeerRpcFailure("SYNC_LOG_FAILED", peer, err.message);
   }
 }
 

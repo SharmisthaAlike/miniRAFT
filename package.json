@@ -4,6 +4,11 @@
   "description": "Integration testing root for MiniRAFT",
   "private": true,
   "scripts": {
+    "cluster:up": "node scripts/cluster.js up --build",
+    "cluster:down": "node scripts/cluster.js down",
+    "cluster:logs": "node scripts/cluster.js logs replica1 replica2 replica3 gateway",
+    "cluster:open": "node scripts/cluster.js open",
+    "cluster:swap": "node scripts/cluster.js swap",
     "test": "jest tests/integration.test.js --runInBand --detectOpenHandles --forceExit"
   },
   "jest": {

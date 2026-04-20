@@ -15,16 +15,21 @@ Install Docker Desktop or Docker Engine with Compose support on macOS, Linux, or
 colima start
 ```
 
+Install Node.js 20+ for helper scripts:
+```bash
+npm install
+```
+
 ### Starting the Cluster
 ```bash
 # Build and start Gateway, Frontend, and all 3 Replicas
-docker compose up -d --build
+npm run cluster:up
 
 # Open the Glassmorphic Frontend Dashboard in your browser
-# http://localhost:8080
+npm run cluster:open
 
 # Watch replica logs in real-time
-docker compose logs -f replica1 replica2 replica3
+npm run cluster:logs
 ```
 
 ### Simulating Failovers
@@ -108,6 +113,11 @@ miniraft/
 A script safely restarts replicas without affecting the cluster:
 ```bash
 ./blue-green-swap.sh replica1
+```
+
+Cross-platform alternative (works on macOS/Linux/Windows):
+```bash
+node scripts/cluster.js swap replica1
 ```
 
 ### 5. CI/CD Pipeline
